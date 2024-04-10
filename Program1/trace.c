@@ -1,8 +1,9 @@
 #include <pcap.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
-void printICMPHeader(const u_char *packet);
+void printICMPHeader(const u_char *packet, int headerLength);
 
 unsigned short in_cksum(unsigned short *addr,int len)
 {
@@ -33,6 +34,33 @@ unsigned short in_cksum(unsigned short *addr,int len)
         answer = ~sum;                          /* truncate to 16 bits */
         return(answer);
 }
+void printUDPHeader(const u_char *packet, int headerLength) {
+    
+    printf("\n\n\tUDP Header\n");
+    uint16_t src = packet[14 + headerLength];
+    uint16_t swapped = src << 8;
+    src = swapped | packet[15 + headerLength];
+    if (src == 53) {
+        printf("\t\tSource Port: DNS\n");
+    } 
+    else {
+        printf("\t\tSource Port: %u\n", src);
+    }
+
+    uint16_t dest = (packet[16 + headerLength] << 8) | packet[17 + headerLength];
+    if (dest == 53) {
+        printf("\t\tDest Port: DNS\n");
+    } 
+    else {
+        printf("\t\tDest Port: %u\n", dest);
+    }
+}
+
+// void stringToLower(char *str) {
+//     for (int i = 0; str[i]; i++) {
+//         str[i] = tolower(str[i]);
+//     }
+// }
 
 void printIPHeader(const u_char *packet) {
     struct pcap_pkthdr header;
@@ -70,12 +98,30 @@ void printIPHeader(const u_char *packet) {
         printf("\t\tProtocol: Unknown\n");
     }
 
+    unsigned short *checksum_position = (unsigned short *)(packet + 24); // 14 bytes Ethernet header + 10 bytes IP header offset
+    unsigned short original_checksum = *checksum_position;
+    original_checksum = ntohs(original_checksum);
+
+    // char str[6];
+    // sprintf(str, "%x", original_checksum);
+
+    // stringToLower(original_checksum);
+    //*checksum_position = 0;
+
+    // for (i = 14; i < 14 + headerBytes; i++) {
+    //     printf("%02x ", packet[i]);
+    // }
+    // printf("\n");
+
     unsigned short checksum = in_cksum((unsigned short *)(packet + 14), headerBytes);
-    if (checksum != 0xFFFF) {
-        printf("\t\tChecksum: Incorrect (0x%X)\n", checksum);
+    
+    //*checksum_position = original_checksum;
+
+    if (checksum != 0) {
+        printf("\t\tChecksum: Incorrect (0x%x)\n", original_checksum);
     }
     else {
-        printf("\t\tChecksum: 0x%X\n", checksum);
+        printf("\t\tChecksum: 0x%x\n", original_checksum);
     }
 
     printf("\t\tSender IP: "); // Print Sender IP
@@ -89,20 +135,29 @@ void printIPHeader(const u_char *packet) {
         if (i != 33) printf(".");
     }
 
-    printICMPHeader(packet);
+    if (Protocol == 0x0001) {
+        printICMPHeader(packet, headerBytes);
+    }
+    else if (Protocol == 0x0011) {
+        printUDPHeader(packet, headerBytes);
+    }
 
 }
 
-void printICMPHeader(const u_char *packet){
-    int offset = 34;
-    printf("\n\n\tICMP Header");
-    uint8_t ICMPType = packet[0 + offset];
-    if (ICMPType == 0x8) {
-        printf("\n\t\tType: Request");
-    }
-    if (ICMPType == 0x0) {
-        printf("\n\t\tType: Reply");
-    }
+void printICMPHeader(const u_char *packet, int headerLength) {
+        printf("\n\n\tICMP Header");
+        uint8_t ICMPType = packet[14 + headerLength];
+
+        if (ICMPType == 8) {
+            printf("\n\t\tType: Request");
+        }
+        else if (ICMPType == 0) {
+            printf("\n\t\tType: Reply");
+        }
+        else {
+            printf("\n\t\tType: %u", ICMPType);
+        }
+
 }
 
 void printARPHeader(const u_char *packet) {
@@ -145,6 +200,7 @@ void printARPHeader(const u_char *packet) {
         printf("%d", packet[i]);
         if (i != 41) printf(".");
     }
+    printf("\n");
 }
 
 const char* getType(const u_char *packet) {
@@ -168,8 +224,11 @@ void printEthernetHeader(pcap_t *handle) {
     const u_char *packet;
     struct pcap_pkthdr header;
     int packetNum = 1;
+    int counter = 0;
 
     while ((packet = pcap_next(handle, &header)) != NULL) {
+        if (counter == 100) break;
+        counter++;
         printf("\n");
         printf("Packet number: %d  ", packetNum);
         printf("Packet Len: %u\n\n", header.len);
@@ -202,7 +261,7 @@ void printEthernetHeader(pcap_t *handle) {
             printf("Invalid type.");
         }
         
-        printf("\n\n");
+        printf("\n");
 
         packetNum++;
     }
@@ -219,7 +278,7 @@ void printWholeHeader(pcap_t *handle) {
             printf("%02x ", packet[i]);
             if ((i + 1) % 16 == 0) printf("\n");
         }
-        printf("\n");
+        // printf("\n");
     }
 }
 
@@ -227,7 +286,7 @@ int main(void) {
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
 
-    handle = pcap_open_offline("IP_bad_checksum.pcap", errbuf);
+    handle = pcap_open_offline("ArpTest.pcap", errbuf);
     if (handle == NULL) {
         fprintf(stderr, "Couldn't open pcap file: %s\n", errbuf);
         return 2;
