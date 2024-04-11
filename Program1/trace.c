@@ -34,11 +34,45 @@ unsigned short in_cksum(unsigned short *addr,int len)
         answer = ~sum;                          /* truncate to 16 bits */
         return(answer);
 }
+
+void printTCPHeader(const u_char *packet, int headerLength) {
+    printf("\n\n\tTCP Header\n");
+
+    uint16_t src = *(uint16_t*)(packet + 14 + headerLength);
+    src = ntohs(src);
+    if (src == 80) {
+        printf("\t\tSource Port:  HTTP\n");
+    }
+    else {
+        printf("\t\tSource Port: %u\n", src);
+    }
+    
+    uint16_t dest = *(uint16_t*)(packet + 16 + headerLength);
+    dest = ntohs(dest);
+    if (dest == 80) {
+        printf("\t\tDest Port:  HTTP\n");
+    }
+    else {
+        printf("\t\tDest Port:  %u\n", dest);
+    }
+
+    uint32_t sequenceNum = *(uint32_t *)(packet + 18 + headerLength);
+    sequenceNum = ntohl(sequenceNum);
+    printf("\t\tSequence Number: %u\n", sequenceNum);
+
+    uint32_t ackNum = *(uint32_t *)(packet + 22 + headerLength);
+    ackNum = ntohl(ackNum);
+    printf("\t\tACK Number: %u\n", ackNum);
+
+    uint8_t offset = *(uint8_t *)(packet + 26 + headerLength);
+    printf("\t\tData Offset (bytes): %u\n", offset);
+}
+
 void printUDPHeader(const u_char *packet, int headerLength) {
     
     printf("\n\n\tUDP Header\n");
     uint16_t src = packet[14 + headerLength];
-    uint16_t swapped = src << 8;
+    uint16_t swapped = ntohs(src);
     src = swapped | packet[15 + headerLength];
     if (src == 53) {
         printf("\t\tSource Port: DNS\n");
@@ -47,7 +81,7 @@ void printUDPHeader(const u_char *packet, int headerLength) {
         printf("\t\tSource Port: %u\n", src);
     }
 
-    uint16_t dest = (packet[16 + headerLength] << 8) | packet[17 + headerLength];
+    uint16_t dest = (ntohs(packet[16 + headerLength])) | packet[17 + headerLength];
     if (dest == 53) {
         printf("\t\tDest Port: DNS\n");
     } 
@@ -55,12 +89,6 @@ void printUDPHeader(const u_char *packet, int headerLength) {
         printf("\t\tDest Port: %u\n", dest);
     }
 }
-
-// void stringToLower(char *str) {
-//     for (int i = 0; str[i]; i++) {
-//         str[i] = tolower(str[i]);
-//     }
-// }
 
 void printIPHeader(const u_char *packet) {
     struct pcap_pkthdr header;
@@ -94,6 +122,9 @@ void printIPHeader(const u_char *packet) {
     if (Protocol == 0x0001) {
         printf("\t\tProtocol: ICMP\n");
     }
+    else if (Protocol == 0x0006) {
+        printf("\t\tProtocol: TCP\n");
+    }
     else {
         printf("\t\tProtocol: Unknown\n");
     }
@@ -102,21 +133,8 @@ void printIPHeader(const u_char *packet) {
     unsigned short original_checksum = *checksum_position;
     original_checksum = ntohs(original_checksum);
 
-    // char str[6];
-    // sprintf(str, "%x", original_checksum);
-
-    // stringToLower(original_checksum);
-    //*checksum_position = 0;
-
-    // for (i = 14; i < 14 + headerBytes; i++) {
-    //     printf("%02x ", packet[i]);
-    // }
-    // printf("\n");
-
     unsigned short checksum = in_cksum((unsigned short *)(packet + 14), headerBytes);
     
-    //*checksum_position = original_checksum;
-
     if (checksum != 0) {
         printf("\t\tChecksum: Incorrect (0x%x)\n", original_checksum);
     }
@@ -140,6 +158,9 @@ void printIPHeader(const u_char *packet) {
     }
     else if (Protocol == 0x0011) {
         printUDPHeader(packet, headerBytes);
+    }
+    else if (Protocol == 0x0006) {
+        printTCPHeader(packet, headerBytes);
     }
 
 }
@@ -227,7 +248,7 @@ void printEthernetHeader(pcap_t *handle) {
     int counter = 0;
 
     while ((packet = pcap_next(handle, &header)) != NULL) {
-        if (counter == 100) break;
+        if (counter == 10) break;
         counter++;
         printf("\n");
         printf("Packet number: %d  ", packetNum);
@@ -286,7 +307,7 @@ int main(void) {
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
 
-    handle = pcap_open_offline("ArpTest.pcap", errbuf);
+    handle = pcap_open_offline("largeMix.pcap", errbuf);
     if (handle == NULL) {
         fprintf(stderr, "Couldn't open pcap file: %s\n", errbuf);
         return 2;
