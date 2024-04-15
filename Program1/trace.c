@@ -2,6 +2,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+typedef struct {
+    uint32_t sourceAddress;       // 32-bit Source IP Address
+    uint32_t destinationAddress;  // 32-bit Destination IP Address
+    uint8_t  reserved;            // 8 bits reserved (set to zero)
+    uint8_t  protocol;            // 8-bit Protocol number
+    uint16_t tcpLength;           // 16-bit TCP Length
+} PseudoHeader;
 
 void printICMPHeader(const u_char *packet, int headerLength);
 
@@ -35,19 +45,41 @@ unsigned short in_cksum(unsigned short *addr,int len)
         return(answer);
 }
 
-void printTCPHeader(const u_char *packet, int headerLength) {
-    printf("\n\n\tTCP Header\n");
+void printTCPHeader(const u_char *packet, int IPHeaderLength, uint32_t IPSrc, uint32_t IPDest, uint8_t protocol) {
+    PseudoHeader pHeader;
+    pHeader.sourceAddress = IPSrc;
+    pHeader.destinationAddress = IPDest;
+    pHeader.reserved = 0;
+    pHeader.protocol = protocol;
 
-    uint16_t src = *(uint16_t*)(packet + 14 + headerLength);
+    uint16_t ipTotalLength = ntohs(*(uint16_t *)(packet + 14 + 2));
+    uint16_t tcpLength = ipTotalLength - IPHeaderLength;
+    pHeader.tcpLength = htons(tcpLength);
+
+    printf("\n\n\tTCP Header");
+
+    int pseudoHeaderSize = sizeof(PseudoHeader);
+    int totalSize = pseudoHeaderSize + tcpLength;
+    unsigned char *buf = malloc(totalSize);
+    if (!buf) {
+        printf("Memory allocation failed\n");
+        return;
+    }
+    memcpy(buf, &pHeader, pseudoHeaderSize);
+    memcpy(buf + pseudoHeaderSize, packet + 14 + IPHeaderLength, tcpLength); // Copy TCP header and data
+
+    printf("\n");
+
+    uint16_t src = *(uint16_t*)(packet + 14 + IPHeaderLength);
     src = ntohs(src);
     if (src == 80) {
         printf("\t\tSource Port:  HTTP\n");
     }
     else {
-        printf("\t\tSource Port: %u\n", src);
+        printf("\t\tSource Port:  %u\n", src);
     }
     
-    uint16_t dest = *(uint16_t*)(packet + 16 + headerLength);
+    uint16_t dest = *(uint16_t*)(packet + 16 + IPHeaderLength);
     dest = ntohs(dest);
     if (dest == 80) {
         printf("\t\tDest Port:  HTTP\n");
@@ -56,16 +88,68 @@ void printTCPHeader(const u_char *packet, int headerLength) {
         printf("\t\tDest Port:  %u\n", dest);
     }
 
-    uint32_t sequenceNum = *(uint32_t *)(packet + 18 + headerLength);
+    uint32_t sequenceNum = *(uint32_t *)(packet + 18 + IPHeaderLength);
     sequenceNum = ntohl(sequenceNum);
     printf("\t\tSequence Number: %u\n", sequenceNum);
 
-    uint32_t ackNum = *(uint32_t *)(packet + 22 + headerLength);
+    uint32_t ackNum = *(uint32_t *)(packet + 22 + IPHeaderLength);
     ackNum = ntohl(ackNum);
     printf("\t\tACK Number: %u\n", ackNum);
 
-    uint8_t offset = *(uint8_t *)(packet + 26 + headerLength);
+    uint8_t offsetAndFlags = *(uint8_t *)(packet + 26 + IPHeaderLength);
+    uint8_t offset = (offsetAndFlags >> 4) & 0x0F;
+    offset *= 4;
     printf("\t\tData Offset (bytes): %u\n", offset);
+
+    uint16_t flags = *(uint16_t *)(packet + 26 + IPHeaderLength);
+    flags = ntohs(flags);
+    int syn = flags & 0x2;
+    if (syn) {
+        printf("\t\tSYN Flag: Yes\n");
+    }
+    else {
+        printf("\t\tSYN Flag: No\n");
+    }
+    int rst = flags &0x1;
+    int fin = flags &0x4;
+    if (fin) {
+        printf("\t\tRST Flag: Yes\n");
+    }
+    else {
+        printf("\t\tRST Flag: No\n");
+    }
+    if (rst) {
+        printf("\t\tFIN Flag: Yes\n");
+    }
+    else {
+        printf("\t\tFIN Flag: No\n");
+    }
+    int ack = flags &0x10;
+    if (ack) {
+        printf("\t\tACK Flag: Yes\n");
+    }
+    else {
+        printf("\t\tACK Flag: No\n");
+    }
+
+    uint16_t windowSize = *(uint16_t *)(packet + 28 + IPHeaderLength);
+    windowSize = ntohs(windowSize);
+    printf("\t\tWindow Size: %u\n", windowSize);
+    
+    unsigned short checksum = in_cksum((unsigned short *)buf, totalSize);
+
+    unsigned short *checksum_position = (unsigned short *)(packet + 14 + IPHeaderLength + 16); // 14 bytes Ethernet header + 10 bytes IP header offset
+    unsigned short original_checksum = *checksum_position;
+    original_checksum = ntohs(original_checksum);
+
+    if (checksum != 0) {
+        printf("\t\tChecksum: Incorrect (0x%04x)\n", original_checksum);
+    }
+    else {
+        printf("\t\tChecksum: Correct (0x%04x)\n", original_checksum);
+    }
+
+    free(buf);
 }
 
 void printUDPHeader(const u_char *packet, int headerLength) {
@@ -75,18 +159,18 @@ void printUDPHeader(const u_char *packet, int headerLength) {
     uint16_t swapped = ntohs(src);
     src = swapped | packet[15 + headerLength];
     if (src == 53) {
-        printf("\t\tSource Port: DNS\n");
+        printf("\t\tSource Port:  DNS\n");
     } 
     else {
-        printf("\t\tSource Port: %u\n", src);
+        printf("\t\tSource Port:  %u\n", src);
     }
 
     uint16_t dest = (ntohs(packet[16 + headerLength])) | packet[17 + headerLength];
     if (dest == 53) {
-        printf("\t\tDest Port: DNS\n");
+        printf("\t\tDest Port:  DNS\n");
     } 
     else {
-        printf("\t\tDest Port: %u\n", dest);
+        printf("\t\tDest Port:  %u\n", dest);
     }
 }
 
@@ -125,6 +209,9 @@ void printIPHeader(const u_char *packet) {
     else if (Protocol == 0x0006) {
         printf("\t\tProtocol: TCP\n");
     }
+    else if (Protocol == 0x0011) {
+        printf("\t\tProtocol: UDP\n");
+    }
     else {
         printf("\t\tProtocol: Unknown\n");
     }
@@ -136,10 +223,10 @@ void printIPHeader(const u_char *packet) {
     unsigned short checksum = in_cksum((unsigned short *)(packet + 14), headerBytes);
     
     if (checksum != 0) {
-        printf("\t\tChecksum: Incorrect (0x%x)\n", original_checksum);
+        printf("\t\tChecksum: Incorrect (0x%04x)\n", original_checksum);
     }
     else {
-        printf("\t\tChecksum: 0x%x\n", original_checksum);
+        printf("\t\tChecksum: Correct (0x%04x)\n", original_checksum);
     }
 
     printf("\t\tSender IP: "); // Print Sender IP
@@ -153,6 +240,9 @@ void printIPHeader(const u_char *packet) {
         if (i != 33) printf(".");
     }
 
+    uint32_t src = (*(uint32_t *)(packet + 26));
+    uint32_t dest = (*(uint32_t *)(packet + 30));
+
     if (Protocol == 0x0001) {
         printICMPHeader(packet, headerBytes);
     }
@@ -160,7 +250,7 @@ void printIPHeader(const u_char *packet) {
         printUDPHeader(packet, headerBytes);
     }
     else if (Protocol == 0x0006) {
-        printTCPHeader(packet, headerBytes);
+        printTCPHeader(packet, headerBytes, src, dest, Protocol);
     }
 
 }
@@ -178,6 +268,8 @@ void printICMPHeader(const u_char *packet, int headerLength) {
         else {
             printf("\n\t\tType: %u", ICMPType);
         }
+
+        printf("\n");
 
 }
 
@@ -221,7 +313,7 @@ void printARPHeader(const u_char *packet) {
         printf("%d", packet[i]);
         if (i != 41) printf(".");
     }
-    printf("\n");
+    printf("\n\n");
 }
 
 const char* getType(const u_char *packet) {
@@ -248,7 +340,7 @@ void printEthernetHeader(pcap_t *handle) {
     int counter = 0;
 
     while ((packet = pcap_next(handle, &header)) != NULL) {
-        if (counter == 10) break;
+        // if (counter == 10) break;
         counter++;
         printf("\n");
         printf("Packet number: %d  ", packetNum);
@@ -282,7 +374,7 @@ void printEthernetHeader(pcap_t *handle) {
             printf("Invalid type.");
         }
         
-        printf("\n");
+        // printf("\n");
 
         packetNum++;
     }
@@ -307,7 +399,7 @@ int main(void) {
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
 
-    handle = pcap_open_offline("largeMix.pcap", errbuf);
+    handle = pcap_open_offline("TCP_bad_checksum.pcap", errbuf);
     if (handle == NULL) {
         fprintf(stderr, "Couldn't open pcap file: %s\n", errbuf);
         return 2;
