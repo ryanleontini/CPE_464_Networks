@@ -56,7 +56,7 @@ void printTCPHeader(const u_char *packet, int IPHeaderLength, uint32_t IPSrc, ui
     uint16_t tcpLength = ipTotalLength - IPHeaderLength;
     pHeader.tcpLength = htons(tcpLength);
 
-    printf("\n\n\tTCP Header");
+    printf("\n\tTCP Header");
 
     int pseudoHeaderSize = sizeof(PseudoHeader);
     int totalSize = pseudoHeaderSize + tcpLength;
@@ -154,7 +154,7 @@ void printTCPHeader(const u_char *packet, int IPHeaderLength, uint32_t IPSrc, ui
 
 void printUDPHeader(const u_char *packet, int headerLength) {
     
-    printf("\n\n\tUDP Header\n");
+    printf("\n\tUDP Header\n");
     uint16_t src = packet[14 + headerLength];
     uint16_t swapped = ntohs(src);
     src = swapped | packet[15 + headerLength];
@@ -180,7 +180,7 @@ void printIPHeader(const u_char *packet) {
     int i;
     int headerBytes;
 
-    printf("\n\n\tIP Header\n");
+    printf("\n\tIP Header\n");
     
     uint8_t firstByte = packet[14];
     uint8_t version = firstByte & 0xF0; // Header len
@@ -239,6 +239,8 @@ void printIPHeader(const u_char *packet) {
         printf("%d", packet[i]);
         if (i != 33) printf(".");
     }
+    printf("\n");
+
 
     uint32_t src = (*(uint32_t *)(packet + 26));
     uint32_t dest = (*(uint32_t *)(packet + 30));
@@ -256,7 +258,7 @@ void printIPHeader(const u_char *packet) {
 }
 
 void printICMPHeader(const u_char *packet, int headerLength) {
-        printf("\n\n\tICMP Header");
+        printf("\n\tICMP Header");
         uint8_t ICMPType = packet[14 + headerLength];
 
         if (ICMPType == 8) {
@@ -277,7 +279,7 @@ void printARPHeader(const u_char *packet) {
     struct pcap_pkthdr header;
     int packetNum = 1;
 
-    printf("\n\n\tARP header\n");
+    printf("\n\tARP header\n");
     uint16_t opcode = ntohs(*(uint16_t *)(packet + 20));
 
     printf("\t\tOpcode: "); // Print Opcode
@@ -363,7 +365,7 @@ void printEthernetHeader(pcap_t *handle) {
         printf("\n\t\tType: "); // Print type
         const char* typeString;
         typeString = getType(packet);
-
+        printf("\n");
 
         if (strcmp(typeString, "ARP") == 0) {
             printARPHeader(packet);
@@ -395,11 +397,18 @@ void printWholeHeader(pcap_t *handle) {
     }
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+    if (argc != 2) { 
+        fprintf(stderr, "Usage: %s <filename>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    char *filename = argv[1];
+
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
 
-    handle = pcap_open_offline("TCP_bad_checksum.pcap", errbuf);
+    handle = pcap_open_offline(filename, errbuf);
     if (handle == NULL) {
         fprintf(stderr, "Couldn't open pcap file: %s\n", errbuf);
         return 2;
