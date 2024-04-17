@@ -27,6 +27,7 @@
 int safeRecv(int socketNum, uint8_t * buffer, int bufferLen, int flag)
 {
     int bytesReceived = recv(socketNum, buffer, bufferLen, flag);
+    printf("recv returned: %d\n", bytesReceived);
     if (bytesReceived < 0)
     {
         if (errno == ECONNRESET)

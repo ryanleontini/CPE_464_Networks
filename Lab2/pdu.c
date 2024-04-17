@@ -15,11 +15,11 @@ int sendPDU(int socketNumber, uint8_t * dataBuffer, int lengthOfData) {
 
     pdu = malloc(totalLength);
     if (pdu == NULL) {
-        perror("Failed to allocate memory for PDU");
+        perror("Failed to allocate memory for PU");
         return -1;
     }
 
-    netLength = htons(lengthOfData);
+    netLength = htons(totalLength);
     
     memcpy(pdu, &netLength, 2); /* Copy length into buffer. */
     memcpy(pdu + 2, dataBuffer, lengthOfData); /* Copy data into buffer. */
@@ -50,11 +50,11 @@ int recvPDU(int clientSocket, uint8_t * dataBuffer, int bufferSize) {
         return 0; 
     }
 
-    pduLength = ntohs(pduLength);
+    pduLength = ntohs(pduLength) - 2;
 
     if (pduLength > bufferSize) {
         fprintf(stderr, "Buffer size is too small for the received PDU\n");
-        exit(EXIT_FAILURE); // Exit as there's a serious flaw in buffer management
+        exit(EXIT_FAILURE);
     }
 
     /* Second recv for PDU data */
