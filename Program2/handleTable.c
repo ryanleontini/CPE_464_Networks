@@ -4,7 +4,7 @@
 
 typedef struct {
     int validFlag; /* Server has accepted client? */
-    char handle; /* 100 character handle + null terminator. */
+    char* handle; /* 100 character handle + null terminator. */
 } Handle;
 
 Handle *handleTable = NULL;
@@ -46,7 +46,7 @@ void resizeHandleTable() {
     handleTableCapacity = newCapacity;
 }
 
-int addHandle (int socketNum, char * handle) {
+int addHandle(int socketNum, char * handle) {
     /* Check if handle already in table. */
     for (int i = 0; i < handleTableSize; i++) {
         if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
@@ -70,7 +70,7 @@ int addHandle (int socketNum, char * handle) {
     return 0;
 }
 
-void removeHandle (size_t socketNum) {
+void removeHandle(size_t socketNum) {
     if (index < handleTableSize && handleTable[socketNum].validFlag) {
         free(handleTable[socketNum].handle);
         handleTable[socketNum].handle = NULL;
@@ -78,7 +78,7 @@ void removeHandle (size_t socketNum) {
     }
 }
 
-int findSocket (char * handle) {
+int findSocket(char * handle) {
     for (size_t i = 0; i < handleTableSize; i++) {
         if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
             return (int)i;
@@ -87,7 +87,7 @@ int findSocket (char * handle) {
     return -1;
 }
 
-char * findHandle (size_t socketNum) {
+char * findHandle(size_t socketNum) {
     if (index < handleTableSize && handleTable[socketNum].validFlag) {
         return handleTable[socketNum].handle;
     }

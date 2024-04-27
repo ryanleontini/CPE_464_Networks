@@ -28,15 +28,16 @@
 #include "pdu.h"
 #include "pollLib.h"
 
-#define MAXBUF 1024
+#define MAXBUF 1400
 #define DEBUG_FLAG 1
 
 int readFromStdin(uint8_t * buffer);
 void checkArgs(int argc, char * argv[]);
-void clientControl(int socketNum);
+void clientControl(int socketNum, char *clientHandle);
 void processMsgFromServer(int socketNum);
 void processStdin(int socketNum);
 void connectToServer(int socketNum, char *clientHandle);
+int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text);
 
 int main(int argc, char * argv[])
 {
@@ -52,11 +53,11 @@ int main(int argc, char * argv[])
 	/* Connect to server */
 	connectToServer(socketNum, argv[3]);
 
-	printf("Enter message: ");
-	fflush(stdout);
-	addToPollSet(STDIN_FILENO);
+	// printf("Enter message: ");
+	// fflush(stdout);
+	// addToPollSet(STDIN_FILENO);
 
-	clientControl(socketNum);
+	clientControl(socketNum, argv[3]);
 	
 	close(socketNum);
 	
@@ -81,12 +82,12 @@ void connectToServer(int socketNum, char *clientHandle) {
 			printf("Failed to send\n");
 		}
 		else {
-			printf("Sent %d bytes.", sent);
+			// printf("Sent %d bytes.\n", sent);
 		}
     }
 }
 
-void clientControl(int socketNum) {
+void clientControl(int socketNum, char *clientHandle) {
     struct pollfd fds[2];
     fds[0].fd = socketNum;
     fds[0].events = POLLIN;
@@ -106,15 +107,52 @@ void clientControl(int socketNum) {
         }
 
         if (fds[1].revents & POLLIN) {
+			printf("Hello\n");
+			/* Need to accept commands here. */
             char buf[MAXBUF];
             if (fgets(buf, sizeof(buf), stdin) == NULL) break;
-			int len = strlen(buf) - 1;
 
-			int sent = sendPDU(socketNum, (uint8_t *)buf, len);
-			if (sent < 0) {
-        		perror("Error sending data");
-        		return ; 
-    		}
+            int len = strlen(buf);
+            if (buf[len - 1] == '\n') {
+                buf[len - 1] = '\0';
+                len--;
+            }
+			printf("Hell\n");
+
+            char *command = strtok(buf, " ");
+            if (command == NULL) {
+                printf("Invalid command format.\n");
+                continue;
+            }
+			printf("Hel\n");
+
+			switch (command[1]) {
+				case 'M': {
+					printf("He\n");
+					char buffer[MAXBUF];
+					char *destinationHandle = strtok(NULL, " ");
+					printf("H\n");
+					char *text = strtok(NULL, "");  // Get the rest of the text
+					printf("Heh\n");
+					// if (destinationHandle == NULL || text == NULL) {
+					// 	printf("Invalid format for M command.\n");
+					// 	break;
+					// }
+					printf("Sending message to %s.\n", destinationHandle);
+					int result = packMessage(buffer, MAXBUF, 5, 1, clientHandle, destinationHandle, text);
+					int sent = sendPDU(socketNum, buffer, result);
+
+					if (sent < 0) {
+						perror("Error sending data");
+						break; 
+					}
+					break;
+				}
+				default: {
+					printf("Invalid command.\n");
+					break;
+				}
+			}
         }
 
         if ((fds[0].revents & (POLLERR | POLLHUP | POLLNVAL))) {
@@ -122,6 +160,33 @@ void clientControl(int socketNum) {
             break;
         }
 	}
+}
+
+int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text) {
+	    if (!buffer || !srcHandle || !destHandle || !text) return -1;
+
+	size_t srcHandleLen = strlen(srcHandle);
+    size_t destHandleLen = strlen(destHandle);
+    size_t textLen = strlen(text);
+    int offset = 0;
+
+	size_t totalLength = 1 + srcHandleLen + 1 + 1 + destHandleLen + 1 + textLen + 1;
+
+	buffer[offset++] = flag; /* Flag */
+	buffer[offset++] = srcHandleLen; /* SrcHandleLen */
+	buffer[offset] = srcHandle; /* SrcHandle */
+	offset+=srcHandleLen;
+	buffer[offset++] = numHandles; /* # of handles. */
+	buffer[offset++] = destHandleLen; /* DestHandleLen */
+	buffer[offset] = destHandle; /* DestHandle */
+	offset+=destHandleLen;
+	buffer[offset++] = textLen; /* TextLen */
+	buffer[offset] = text; /* Text */
+	offset += textLen;
+	buffer[offset] = '\0'; /* Null term */
+
+	return totalLength;
+	/* Check if text is too big, split text up. */
 }
 
 void processMsgFromServer(int socketNum) {
@@ -144,9 +209,44 @@ void processMsgFromServer(int socketNum) {
 	} else if (recvLen == 0) {
 		return;
 	} else {
-		printf("%.*s\n", recvLen, recvBuf);
-		printf("Enter message: ");
-		fflush(stdout);
+		int flag = recvBuf[0];
+
+		switch (flag) {
+			case 2: {
+				printf("Connected to the server.\n$: ");
+				fflush(stdout);
+				break;
+			}
+			case 3: {
+				/* Bad handle. Quit client. */
+				printf("Handle name already taken. Please try another handle name.\n");
+				exit(EXIT_FAILURE);
+			}
+			case 7: {
+				/* Destination handle does not exist. */
+				break;
+			}
+			case 9: {
+				/* ACKing the client's exit. */
+				break;
+			}
+			case 11: {
+				/* Serving sending number of handles stored on server. */
+				break;
+			}
+			case 12: {
+				/* A packet of one of the handles from handle list. */
+				break;
+			}
+			case 13: {
+				/* Handle list is complete. */
+				break;
+			}
+			default: {
+				printf("Invalid flag\n");
+				break;
+			}
+		}
 	}
 
 }
