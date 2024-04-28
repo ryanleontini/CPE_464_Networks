@@ -2,14 +2,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-typedef struct {
-    int validFlag; /* Server has accepted client? */
-    char* handle; /* 100 character handle + null terminator. */
-} Handle;
+#include "handletable.h"
 
 Handle *handleTable = NULL;
 size_t handleTableCapacity = 0;
 size_t handleTableSize = 0;
+int numValid = 0;
 
 void printHandleInHex(const char* handle);
 
@@ -57,9 +55,17 @@ int addHandle(int socketNum, char * handle) {
     }
 
     /* Check if handle already in table. */
-    if (handleTable[socketNum].validFlag && strcmp(handleTable[socketNum].handle, handle) == 0) {
-        return -1; // Handle already exists
+    for (int i = 0; i < handleTableSize; i++) {
+        if (handleTable[i].handle != NULL) {
+            printf("Handle: %s", handle);
+            if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
+                printf("Found");
+                // printHandleInHex(handleTable[socketNum].handle);
+                return -1; // Handle already exists
+            }
+        }
     }
+
 
     if (handleTable[socketNum].validFlag) {
         free(handleTable[socketNum].handle);
@@ -74,6 +80,7 @@ int addHandle(int socketNum, char * handle) {
     strcpy(handleTable[socketNum].handle, handle);
     handleTable[socketNum].validFlag = 1;
     
+    numValid++;
     return 0;
 }
 
@@ -137,4 +144,19 @@ void printHandleInHex(const char* handle) {
         printf("%02X ", (unsigned char) *handle++);
     }
     printf("\n");
+}
+
+int32_t getValids(void) {
+    return numValid;
+}
+
+size_t getHandleTableSize(void) {
+    return handleTableSize;
+}
+
+const Handle* getHandleAtIndex(size_t index) {
+    if (index >= handleTableSize) {
+        return NULL;
+    }
+    return &handleTable[index];
 }

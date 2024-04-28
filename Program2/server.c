@@ -38,6 +38,10 @@ void serverControl(int mainSocket);
 void processClient(int clientSocket);
 int extractDestHandle(const uint8_t* buffer, char* destHandle);
 int addNewSocket(int serverSocket);
+int sendErrorPacket(uint8_t* errorBuf, char* destHandle, int destHandleLen);
+int getMessageOffset(uint8_t* dataBuffer);
+int sendHandleNum(int clientSocket);
+void sendFinish(int clientSocket);
 
 void printDataBuffer(void* buffer, size_t length) {
     uint8_t* byteBuffer = (uint8_t*) buffer;
@@ -151,32 +155,71 @@ void processClient(int clientSocket) {
 			/* Message */
 			case 5: {
 				printf("Message received.\n");
-				/* Need to get dest handle. */
 				char destHandle[MAXHANDLE];
-				// memset(destHandle, 0, MAXHANDLE);
+				char errorBuf[MAXBUF];
 				int destHandleLen = extractDestHandle(dataBuffer, destHandle);
-				/* Use dest handle to find socket number. */
-				// printf("Dest handle: %s\n",destHandle);
 				int destSocket = findSocket(destHandle);
-				// printHandleTable();
-				printf("Dest socket: %d\n", destSocket);
+				int offset = sendErrorPacket(errorBuf, destHandle, destHandleLen);
+				// printf("Offset: %d\n", offset);
+
+				// printf("Dest socket: %d\n", destSocket);
 				if (destSocket == -1) {
 					printf("Invalid handle supplied.\n");
-					char errorBuf[MAXBUF];
-					int offset = 0;
-					errorBuf[offset++] = 7;
-					errorBuf[offset++] = destHandleLen;
-    				memcpy(errorBuf + offset, destHandle, destHandleLen);
-					offset+=destHandleLen;
-					errorBuf[offset] = '\0'; 
 					int sent = sendPDU(clientSocket, errorBuf, offset+2);
+					memset(errorBuf, 0, MAXBUF);
 					break;
 				} else {
-					int sent = sendPDU(destSocket, dataBuffer, messageLen);
+					/* Check message size. */
+					int messageOffset = getMessageOffset(dataBuffer);
+					printf("Message offset %d\n", messageOffset);
+					printDataBuffer(dataBuffer, 30);
+					char *message = dataBuffer + messageOffset;
+					int messageLent = strlen(message) + 1; 
+					int sent;
+					if (messageLent > 200) {
+						int bytesToSend = messageLent;
+						int offset = 0;
+
+						while (bytesToSend > 0) {
+							int chunkSize = (bytesToSend > 199) ? 199 : bytesToSend;
+							char packetBuffer[200]; 
+							memcpy(packetBuffer, message + offset, chunkSize);
+							packetBuffer[chunkSize] = '\0'; 
+
+							sent = sendPDU(destSocket, packetBuffer, chunkSize + 1); 
+							bytesToSend -= chunkSize;
+							offset += chunkSize;
+						}
+					} else {
+						sent = sendPDU(destSocket, dataBuffer, messageLen);
+					}
+					// int sent = sendPDU(destSocket, dataBuffer, messageLen);
 					printf("Bytes sent: %d\n", sent);
 					fflush(stdout);
 					break;
 				}
+			}
+			case 10: {
+				int numHandles = sendHandleNum(clientSocket);
+				/* Send handles */
+				int size = getHandleTableSize();
+
+				for (int i = 0; i < size; i++) {
+					Handle *temp = NULL;
+					temp = getHandleAtIndex(i);
+					if (temp->handle != NULL && temp->validFlag == 1) {
+						printf("Found valid handle.\n");
+						char handleBuf[120];
+						handleBuf[0] = 12;
+						int handleLength = strlen(temp->handle);
+						handleBuf[1] = handleLength;
+						memcpy(handleBuf + 2, temp->handle, handleLength);
+						int sent = sendPDU(clientSocket, handleBuf, handleLength + 2);
+					}
+				}
+
+				sendFinish(clientSocket);
+				break;
 			}
 			default: {
 				printf("Invalid flag\n");
@@ -193,7 +236,57 @@ void processClient(int clientSocket) {
 		close(clientSocket);
 		removeFromPollSet(clientSocket);
 	}
+}
 
+void sendFinish(int clientSocket) {
+	char buf[1];
+	buf[0] = 13;
+	int sent = sendPDU(clientSocket, buf, 1);
+}
+
+int sendHandleNum(int clientSocket) {
+	int32_t validHandles = getValids();
+	printf("There are %d handles in the table.\n", validHandles);
+	char handleBuf[5];
+	handleBuf[0] = 11;
+	int32_t netForm = htons(validHandles);
+	memcpy(handleBuf + 1, &netForm, 4);
+	int sent = sendPDU(clientSocket, handleBuf, 5);
+	memset(handleBuf, 0, 5);
+	return validHandles;
+}
+
+int getMessageOffset(uint8_t* dataBuffer) {
+    if (!dataBuffer) return -1;  // Error handling for null pointer
+
+    int offset = 0;
+
+    // Skip the flag byte
+    offset += 1;
+
+    // Read source handle length and skip it and the handle
+    uint8_t srcHandleLen = dataBuffer[offset];
+    offset += 1 + srcHandleLen;  // Increment by 1 for length byte, then srcHandleLen bytes for the handle
+
+    // Skip numHandles byte
+    offset += 1;
+
+    // Read destination handle length and skip it and the handle
+    uint8_t destHandleLen = dataBuffer[offset];
+    offset += 1 + destHandleLen;  // Increment by 1 for length byte, then destHandleLen bytes for the handle
+
+    // Now offset is positioned at the start of the text
+    return offset + 1;
+}
+
+int sendErrorPacket(uint8_t* errorBuf, char* destHandle, int destHandleLen) {
+	int offset = 0;
+	errorBuf[offset++] = 7;
+	errorBuf[offset++] = destHandleLen;
+	memcpy(errorBuf + offset, destHandle, destHandleLen);
+	offset+=destHandleLen;
+	errorBuf[offset] = '\0'; 
+	return offset;
 }
 
 int extractDestHandle(const uint8_t* buffer, char* destHandle) {

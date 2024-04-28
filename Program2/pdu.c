@@ -18,7 +18,7 @@ int sendPDU(int socketNumber, uint8_t * dataBuffer, int lengthOfData) {
 
     pdu = malloc(totalLength);
     if (pdu == NULL) {
-        perror("Failed to allocate memory for PU");
+        perror("Failed to allocate memory for PDU");
         return -1;
     }
 

@@ -159,6 +159,17 @@ void clientControl(int socketNum, char *clientHandle) {
 					memset(buffer, 0, MAXBUF);
 					break;
 				}
+				case 'l':
+				case 'L': {
+					char* buffer[1];
+					buffer[0] = 10;
+					int sent = sendPDU(socketNum, buffer, 1);
+					if (sent < 0) {
+						perror("Error sending data");
+						break; 
+					}
+					break;
+				}
 				default: {
 					printf("Invalid command.\n");
 					memset(buf, 0, sizeof(buf)); 
@@ -280,14 +291,24 @@ void processMsgFromServer(int socketNum) {
 			}
 			case 11: {
 				/* Serving sending number of handles stored on server. */
+				int32_t numHandles;
+				memcpy(&numHandles, recvBuf + 1, 4);
+				numHandles = ntohs(numHandles);
+				printf("There's %d handle(s) in the table.\n", numHandles);
 				break;
 			}
 			case 12: {
 				/* A packet of one of the handles from handle list. */
+				char handle[101];
+				int handleLength = recvBuf[1];
+				memcpy(handle, recvBuf + 2, handleLength);
+				handle[handleLength] = '\0'; // Null-terminate the string
+				printf("%s\n", handle);
 				break;
 			}
 			case 13: {
 				/* Handle list is complete. */
+				printf("Handle table transmission complete.\n");
 				break;
 			}
 			default: {
