@@ -11,8 +11,11 @@ Handle *handleTable = NULL;
 size_t handleTableCapacity = 0;
 size_t handleTableSize = 0;
 
+void printHandleInHex(const char* handle);
+
 void initializeHandleTable(size_t initialSize) {
     handleTableCapacity = initialSize;
+    handleTableSize = initialSize;
     handleTable = malloc(handleTableCapacity * sizeof(Handle));
     if (handleTable == NULL) {
         perror("Failed to create Handle Table.");
@@ -44,34 +47,43 @@ void resizeHandleTable() {
     handleTable = newTable;
     memset(handleTable + handleTableCapacity, 0, (newCapacity - handleTableCapacity) * sizeof(Handle));
     handleTableCapacity = newCapacity;
+    handleTableSize = newCapacity;
 }
 
 int addHandle(int socketNum, char * handle) {
+    // printHandleInHex(handle);
+    if (socketNum >= handleTableCapacity) {
+        resizeHandleTable(socketNum + 1);
+    }
+
     /* Check if handle already in table. */
-    for (int i = 0; i < handleTableSize; i++) {
-        if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
-            return -1;
-        }
+    if (handleTable[socketNum].validFlag && strcmp(handleTable[socketNum].handle, handle) == 0) {
+        return -1; // Handle already exists
     }
 
-    if (handleTableSize >= handleTableCapacity) {
-        resizeHandleTable();
+    if (handleTable[socketNum].validFlag) {
+        free(handleTable[socketNum].handle);
     }
 
-    handleTable[handleTableSize].handle = malloc(strlen(handle) + 1);
-    if (handleTable[handleTableSize].handle == NULL) {
+    handleTable[socketNum].handle = malloc(strlen(handle) + 1);
+    if (handleTable[socketNum].handle == NULL) {
         perror("Failed to allocate Handle.");
-        freeHandleTable();
-        exit(EXIT_FAILURE);
+        return -1;
     }
-    strcpy(handleTable[handleTableSize].handle, handle);
-    handleTable[handleTableSize].validFlag = 1;
-    handleTableSize++;
+
+    strcpy(handleTable[socketNum].handle, handle);
+    handleTable[socketNum].validFlag = 1;
+    
     return 0;
 }
 
 void removeHandle(size_t socketNum) {
-    if (index < handleTableSize && handleTable[socketNum].validFlag) {
+    if (socketNum >= handleTableCapacity) {
+        fprintf(stderr, "Error: socketNum out of bounds.\n");
+        return;
+    }
+
+    if (handleTable[socketNum].validFlag) {
         free(handleTable[socketNum].handle);
         handleTable[socketNum].handle = NULL;
         handleTable[socketNum].validFlag = 0;
@@ -79,8 +91,20 @@ void removeHandle(size_t socketNum) {
 }
 
 int findSocket(char * handle) {
-    for (size_t i = 0; i < handleTableSize; i++) {
+
+    // printHandleInHex(handle);
+    for (size_t i = 0; i < 10; i++) {
+        // if (handleTable[i].handle != NULL) {
+        //     // printf("index is %d\n", i);
+        //     // printf("handle is: %s\n", handle);
+        //     // printHandleInHex(handle);
+        //     // printf("handle table handle: %s\n", handleTable[i].handle);
+        //     printHandleInHex(handleTable[i].handle);
+        //     printf("\n");
+
+        // }
         if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
+            // printHandleInHex(handleTable[i].handle);
             return (int)i;
         }
     }
@@ -88,8 +112,29 @@ int findSocket(char * handle) {
 }
 
 char * findHandle(size_t socketNum) {
-    if (index < handleTableSize && handleTable[socketNum].validFlag) {
+    if (socketNum >= handleTableCapacity) {
+        fprintf(stderr, "Error: socketNum out of bounds.\n");
+        return -1;
+    }
+
+    if (handleTable[socketNum].validFlag) {
         return handleTable[socketNum].handle;
     }
     return NULL;
+}
+
+void printHandleTable() {
+    printf("Current Handle Table:\n");
+    for (size_t i = 0; i < handleTableSize; i++) {
+        if (handleTable[i].validFlag) {
+            printf("Index %zu: Handle = '%s'\n", i, handleTable[i].handle);
+        }
+    }
+}
+
+void printHandleInHex(const char* handle) {
+    while (*handle) {
+        printf("%02X ", (unsigned char) *handle++);
+    }
+    printf("\n");
 }

@@ -112,7 +112,6 @@ int tcpClientSetup(char * serverName, char * serverPort, int debugFlag)
 		perror("socket call");
 		exit(-1);
 	}
-	printf("Socket\n");
 
 	// setup the server structure
 	memset(&serverAddress, 0, sizeof(struct sockaddr_in6));
@@ -124,7 +123,6 @@ int tcpClientSetup(char * serverName, char * serverPort, int debugFlag)
 	{
 		exit(-1);
 	}
-	printf("Server addr\n");
 
 	if(connect(socket_num, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) < 0)
 	{

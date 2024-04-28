@@ -21,13 +21,15 @@
 #include <netdb.h>
 #include <stdint.h>
 
+#include <ctype.h>
+
 #include "networks.h"
 #include "safeUtil.h"
 #include "pdu.h"
 #include "pollLib.h"
 #include "handleTable.h"
 
-#define MAXBUF 1024
+#define MAXBUF 1400
 #define MAXHANDLE 100
 #define DEBUG_FLAG 1
 
@@ -35,6 +37,25 @@ int checkArgs(int argc, char *argv[]);
 void serverControl(int mainSocket);
 void processClient(int clientSocket);
 void extractDestHandle(const uint8_t* buffer, char* destHandle);
+int addNewSocket(int serverSocket);
+
+void printDataBuffer(void* buffer, size_t length) {
+    uint8_t* byteBuffer = (uint8_t*) buffer;
+    printf("Data Buffer Contents:\n");
+    for (size_t i = 0; i < length; i++) {
+        printf("%02x ", byteBuffer[i]);  // Print hexadecimal value
+        if (isprint(byteBuffer[i])) {
+            printf("(%c) ", byteBuffer[i]);  // Print ASCII character if printable
+        } else {
+            printf("(.) ");  // Use a placeholder for non-printable characters
+        }
+        if ((i + 1) % 8 == 0) {
+            printf("\n");  // Print a new line every 8 characters for better readability
+        }
+    }
+    printf("\n");
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -54,20 +75,22 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-void addNewSocket(int serverSocket) {
+int addNewSocket(int serverSocket) {
     struct sockaddr_in clientAddr;
     socklen_t clientAddrLen = sizeof(clientAddr);
     int clientSocket = accept(serverSocket, (struct sockaddr *)&clientAddr, &clientAddrLen);
     if (clientSocket < 0) {
         perror("accept");
-        return;
+        return -1;
     }
 
-    printf("New client connected: %d\n", clientSocket);
+    printf("New client socket added: %d\n", clientSocket);
     addToPollSet(clientSocket);
+	return clientSocket;
 }
 
 void serverControl(int mainSocket) {
+	int clientSocket;
 	setupPollSet();
 	addToPollSet(mainSocket);
 
@@ -75,16 +98,19 @@ void serverControl(int mainSocket) {
 		int nextSocket;
 		nextSocket = pollCall(-1); /* Polls forever until a socket is ready. */
 		if (nextSocket == mainSocket) {
-			addNewSocket(nextSocket); /* New client trying to connect. */
+			clientSocket = addNewSocket(nextSocket); /* New client trying to connect. */
 		}
 		else {
-			processClient(nextSocket);
+			clientSocket = nextSocket;
+			processClient(clientSocket);
 		}
 	}
 }
 
 void processClient(int clientSocket) {
+	printf("Processing client %d\n", clientSocket);
 	uint8_t dataBuffer[MAXBUF];
+	memset(dataBuffer, 0, MAXBUF);
 	int messageLen = 0;
 	
 	if ((messageLen = recvPDU(clientSocket, dataBuffer, MAXBUF)) < 0)
@@ -93,21 +119,19 @@ void processClient(int clientSocket) {
 		exit(-1);
 	}
 
+	int totalLength = messageLen + 2;
+
 	if (messageLen > 0)
 	{
-		// if (messageLen < MAXBUF) {
-        //     dataBuffer[messageLen] = '\0';
-        // } else {
-        //     dataBuffer[MAXBUF - 1] = '\0';
-        // }
 		int flag = dataBuffer[0];
-		printf("Flag before switch: %d\n", flag);
 
 		switch (flag) {
 			case 1: {
-				printf("Flag: %d\n", flag); 
+
 				int handleCheck;
-				handleCheck = addHandle(clientSocket, dataBuffer);
+				handleCheck = addHandle(clientSocket, dataBuffer+1);
+				printf("New connection from: %s\n", dataBuffer+1);
+
 				if (handleCheck == -1) {
 					printf("Handle name already exists.\n");
 					uint8_t newBuf[1];
@@ -118,23 +142,29 @@ void processClient(int clientSocket) {
 					uint8_t newBuf[1];
 					newBuf[0] = 2; /* Flag to send to client. */
 					sendPDU(clientSocket, (uint8_t *)newBuf, 1);
-					printf("New Handle: %s\n", dataBuffer);
+					// printf("New Handle: %s\n", dataBuffer);
+					printHandleTable();
 				}
+				// memset(dataBuffer, 0, MAXBUF);
 				break;
 			}
 			/* Message */
 			case 5: {
-				printf("Received message.\n");
+				printf("Message received.\n");
 				/* Need to get dest handle. */
 				char destHandle[MAXHANDLE];
+				// memset(destHandle, 0, MAXHANDLE);
 				extractDestHandle(dataBuffer, destHandle);
-				printf("Dest handle is %s\n", destHandle);
 				/* Use dest handle to find socket number. */
-
+				// printf("Dest handle: %s\n",destHandle);
 				int destSocket = findSocket(destHandle);
-				printf("Dest socket is %d\n", destSocket);
+				// printHandleTable();
+				// printf("Dest socket: %u\n", destSocket);
 
-				int sent = sendPDU(clientSocket, dataBuffer, MAXBUF);
+
+				int sent = sendPDU(destSocket, dataBuffer, messageLen);
+				printf("Bytes sent: %d\n", sent);
+				fflush(stdout);
 				break;
 			}
 			default: {
@@ -148,6 +178,7 @@ void processClient(int clientSocket) {
 	{
         printf("Client %d disconnected.\n", clientSocket);
 		removeHandle(clientSocket);
+		printHandleTable();
 		close(clientSocket);
 		removeFromPollSet(clientSocket);
 	}
@@ -161,16 +192,12 @@ void extractDestHandle(const uint8_t* buffer, char* destHandle) {
 
     int offset = 0;
     uint8_t flag = buffer[offset++];
-	printf("Flag is %d\n", flag);
     uint8_t srcHandleLen = buffer[offset++];
-	printf("Src is %d\n", srcHandleLen);
     offset += srcHandleLen;
     uint8_t numHandles = buffer[offset++];
-	printf("Number of Handles is %d\n", numHandles);
     uint8_t destHandleLen = buffer[offset++];
-	printf("Dest is %d\n", destHandleLen);
-    memcpy(destHandle, buffer + offset - 1, destHandleLen);
-    destHandle[destHandleLen] = '\0'; // Null-terminate the string
+    memcpy(destHandle, buffer + offset, destHandleLen);
+    destHandle[destHandleLen] = '\0';
 }
 
 int checkArgs(int argc, char *argv[])

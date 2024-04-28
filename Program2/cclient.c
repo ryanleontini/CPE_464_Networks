@@ -29,6 +29,7 @@
 #include "pollLib.h"
 
 #define MAXBUF 1400
+#define MAXHANDLE 100
 #define DEBUG_FLAG 1
 
 int readFromStdin(uint8_t * buffer);
@@ -38,6 +39,9 @@ void processMsgFromServer(int socketNum);
 void processStdin(int socketNum);
 void connectToServer(int socketNum, char *clientHandle);
 int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text);
+int extractSrcHandle(const uint8_t* buffer, char* destHandle);
+void extractMessage(const uint8_t* buffer, char* message, int offset);
+void terminal();
 
 int main(int argc, char * argv[])
 {
@@ -93,9 +97,10 @@ void clientControl(int socketNum, char *clientHandle) {
     fds[0].events = POLLIN;
     fds[1].fd = STDIN_FILENO;
     fds[1].events = POLLIN;	
+	int terminalFlag = 0;
 
 	while (1) {
-
+		if (terminalFlag > 0){ terminal(); }
 		int ret = poll(fds, 2, -1);
         if (ret == -1) {
             perror("Poll error");
@@ -104,10 +109,10 @@ void clientControl(int socketNum, char *clientHandle) {
 
         if (fds[0].revents & POLLIN) {
             processMsgFromServer(socketNum);
+			terminalFlag++;
         }
 
         if (fds[1].revents & POLLIN) {
-			printf("Hello\n");
 			/* Need to accept commands here. */
             char buf[MAXBUF];
             if (fgets(buf, sizeof(buf), stdin) == NULL) break;
@@ -117,28 +122,29 @@ void clientControl(int socketNum, char *clientHandle) {
                 buf[len - 1] = '\0';
                 len--;
             }
-			printf("Hell\n");
 
             char *command = strtok(buf, " ");
             if (command == NULL) {
                 printf("Invalid command format.\n");
+				memset(buf, 0, sizeof(buf)); 
                 continue;
             }
-			printf("Hel\n");
 
 			switch (command[1]) {
+				case 'm':
 				case 'M': {
-					printf("He\n");
 					char buffer[MAXBUF];
 					char *destinationHandle = strtok(NULL, " ");
-					printf("H\n");
-					char *text = strtok(NULL, "");  // Get the rest of the text
-					printf("Heh\n");
-					// if (destinationHandle == NULL || text == NULL) {
-					// 	printf("Invalid format for M command.\n");
-					// 	break;
-					// }
-					printf("Sending message to %s.\n", destinationHandle);
+					if (destinationHandle == NULL) {
+						printf("Destination handle is missing. Please try again.\n");
+						continue;
+					}
+					char *text = strtok(NULL, "");
+					if (text == NULL) {
+						printf("Text is missing or invalid.\n");
+						text = "";
+					}
+					// printf("Sending %s to %s\n", text, destinationHandle);
 					int result = packMessage(buffer, MAXBUF, 5, 1, clientHandle, destinationHandle, text);
 					int sent = sendPDU(socketNum, buffer, result);
 
@@ -146,10 +152,14 @@ void clientControl(int socketNum, char *clientHandle) {
 						perror("Error sending data");
 						break; 
 					}
+					// terminal();
+					memset(buffer, 0, MAXBUF);
 					break;
 				}
 				default: {
 					printf("Invalid command.\n");
+					memset(buf, 0, sizeof(buf)); 
+					// terminal();
 					break;
 				}
 			}
@@ -163,7 +173,7 @@ void clientControl(int socketNum, char *clientHandle) {
 }
 
 int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text) {
-	    if (!buffer || !srcHandle || !destHandle || !text) return -1;
+	if (!buffer || !srcHandle || !destHandle || !text) return -1;
 
 	size_t srcHandleLen = strlen(srcHandle);
     size_t destHandleLen = strlen(destHandle);
@@ -172,18 +182,18 @@ int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char
 
 	size_t totalLength = 1 + srcHandleLen + 1 + 1 + destHandleLen + 1 + textLen + 1;
 
-	buffer[offset++] = flag; /* Flag */
-	buffer[offset++] = srcHandleLen; /* SrcHandleLen */
-	buffer[offset] = srcHandle; /* SrcHandle */
-	offset+=srcHandleLen;
-	buffer[offset++] = numHandles; /* # of handles. */
-	buffer[offset++] = destHandleLen; /* DestHandleLen */
-	buffer[offset] = destHandle; /* DestHandle */
-	offset+=destHandleLen;
-	buffer[offset++] = textLen; /* TextLen */
-	buffer[offset] = text; /* Text */
-	offset += textLen;
-	buffer[offset] = '\0'; /* Null term */
+    buffer[offset++] = (char)flag;              // Flag
+    buffer[offset++] = (char)srcHandleLen;      // SrcHandleLen
+    memcpy(buffer + offset, srcHandle, srcHandleLen);  // Copy srcHandle
+    offset += srcHandleLen;
+    buffer[offset++] = (char)numHandles;        // Number of handles
+    buffer[offset++] = (char)destHandleLen;     // DestHandleLen
+    memcpy(buffer + offset, destHandle, destHandleLen); // Copy destHandle
+    offset += destHandleLen;
+    buffer[offset++] = (char)textLen;           // TextLen
+    memcpy(buffer + offset, text, textLen);     // Copy text
+    offset += textLen;
+    buffer[offset] = '\0'; 
 
 	return totalLength;
 	/* Check if text is too big, split text up. */
@@ -192,7 +202,7 @@ int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char
 void processMsgFromServer(int socketNum) {
 	int recvLen;
 	uint8_t recvBuf[MAXBUF];
-	memset(recvBuf, 0, sizeof(recvBuf));
+	// memset(recvBuf, 0, sizeof(recvBuf));
 
 	/* Check if the server is still connected */
 	recvLen = recvPDU(socketNum, recvBuf, sizeof(recvBuf) - 1);
@@ -213,14 +223,29 @@ void processMsgFromServer(int socketNum) {
 
 		switch (flag) {
 			case 2: {
-				printf("Connected to the server.\n$: ");
-				fflush(stdout);
+				// printf("Connected to the server.\n");
+				// fflush(stdout);
 				break;
 			}
 			case 3: {
 				/* Bad handle. Quit client. */
 				printf("Handle name already taken. Please try another handle name.\n");
 				exit(EXIT_FAILURE);
+				break;
+			}
+			case 5: {
+				char destHandle[MAXHANDLE];
+				char message[200];
+				/* Need to check message length? */
+				int offset;
+				offset = extractSrcHandle(recvBuf, destHandle);
+				extractMessage(recvBuf, message, offset);
+
+				printf("%s: %s\n", destHandle, message);
+				// terminal();
+				// memset(destHandle, 0, MAXHANDLE);
+				// memset(message, 0, 200);
+				break;
 			}
 			case 7: {
 				/* Destination handle does not exist. */
@@ -250,6 +275,35 @@ void processMsgFromServer(int socketNum) {
 	}
 
 }
+
+int extractSrcHandle(const uint8_t* buffer, char* srcHandle) {
+    if (buffer == NULL) {
+        return -1;
+    }
+
+    int offset = 0;
+    uint8_t flag = buffer[offset++];
+    uint8_t srcHandleLen = buffer[offset++];
+	memcpy(srcHandle, buffer + offset, srcHandleLen);
+    srcHandle[srcHandleLen] = '\0';
+    offset += srcHandleLen;
+    uint8_t numHandles = buffer[offset++];
+    uint8_t destHandleLen = buffer[offset++];
+	offset += destHandleLen;
+	return offset;
+}
+
+void extractMessage(const uint8_t* buffer, char* message, int offset) {
+    if (buffer == NULL) {
+        return;
+    }
+
+	uint8_t destHandle = buffer[offset++];
+	uint8_t messageLen = buffer[offset];
+    memcpy(message, buffer + offset, messageLen);
+    message[messageLen] = '\0';
+}
+
 
 void processStdin(int socketNum) {
 	uint8_t sendBuf[MAXBUF]; 
@@ -300,4 +354,9 @@ void checkArgs(int argc, char * argv[])
 		printf("usage: %s host-name port-number handle \n", argv[0]);
 		exit(1);
 	}
+}
+
+void terminal() {
+	printf("$: ");
+	fflush(stdout);
 }

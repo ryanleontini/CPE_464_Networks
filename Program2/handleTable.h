@@ -10,5 +10,6 @@ int addHandle (int socketNum, char * handle);
 void removeHandle (size_t socketNum);
 int findSocket (char * handle);
 char * findHandle (int socketNum);
+void printHandleTable();
 
 #endif
