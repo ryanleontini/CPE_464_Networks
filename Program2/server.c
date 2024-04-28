@@ -36,7 +36,7 @@
 int checkArgs(int argc, char *argv[]);
 void serverControl(int mainSocket);
 void processClient(int clientSocket);
-void extractDestHandle(const uint8_t* buffer, char* destHandle);
+int extractDestHandle(const uint8_t* buffer, char* destHandle);
 int addNewSocket(int serverSocket);
 
 void printDataBuffer(void* buffer, size_t length) {
@@ -154,18 +154,29 @@ void processClient(int clientSocket) {
 				/* Need to get dest handle. */
 				char destHandle[MAXHANDLE];
 				// memset(destHandle, 0, MAXHANDLE);
-				extractDestHandle(dataBuffer, destHandle);
+				int destHandleLen = extractDestHandle(dataBuffer, destHandle);
 				/* Use dest handle to find socket number. */
 				// printf("Dest handle: %s\n",destHandle);
 				int destSocket = findSocket(destHandle);
 				// printHandleTable();
-				// printf("Dest socket: %u\n", destSocket);
-
-
-				int sent = sendPDU(destSocket, dataBuffer, messageLen);
-				printf("Bytes sent: %d\n", sent);
-				fflush(stdout);
-				break;
+				printf("Dest socket: %d\n", destSocket);
+				if (destSocket == -1) {
+					printf("Invalid handle supplied.\n");
+					char errorBuf[MAXBUF];
+					int offset = 0;
+					errorBuf[offset++] = 7;
+					errorBuf[offset++] = destHandleLen;
+    				memcpy(errorBuf + offset, destHandle, destHandleLen);
+					offset+=destHandleLen;
+					errorBuf[offset] = '\0'; 
+					int sent = sendPDU(clientSocket, errorBuf, offset+2);
+					break;
+				} else {
+					int sent = sendPDU(destSocket, dataBuffer, messageLen);
+					printf("Bytes sent: %d\n", sent);
+					fflush(stdout);
+					break;
+				}
 			}
 			default: {
 				printf("Invalid flag\n");
@@ -185,9 +196,9 @@ void processClient(int clientSocket) {
 
 }
 
-void extractDestHandle(const uint8_t* buffer, char* destHandle) {
+int extractDestHandle(const uint8_t* buffer, char* destHandle) {
     if (buffer == NULL) {
-        return;
+        return -1;
     }
 
     int offset = 0;
@@ -198,6 +209,7 @@ void extractDestHandle(const uint8_t* buffer, char* destHandle) {
     uint8_t destHandleLen = buffer[offset++];
     memcpy(destHandle, buffer + offset, destHandleLen);
     destHandle[destHandleLen] = '\0';
+	return destHandleLen;
 }
 
 int checkArgs(int argc, char *argv[])

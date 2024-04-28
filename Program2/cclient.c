@@ -23,6 +23,8 @@
 #include <errno.h>
 #include <poll.h>
 
+#include <ctype.h>
+
 #include "networks.h"
 #include "safeUtil.h"
 #include "pdu.h"
@@ -41,6 +43,7 @@ void connectToServer(int socketNum, char *clientHandle);
 int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text);
 int extractSrcHandle(const uint8_t* buffer, char* destHandle);
 void extractMessage(const uint8_t* buffer, char* message, int offset);
+int extractErrorHandle(const uint8_t* buffer, char* destHandle);
 void terminal();
 
 int main(int argc, char * argv[])
@@ -190,13 +193,29 @@ int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char
     buffer[offset++] = (char)destHandleLen;     // DestHandleLen
     memcpy(buffer + offset, destHandle, destHandleLen); // Copy destHandle
     offset += destHandleLen;
-    buffer[offset++] = (char)textLen;           // TextLen
     memcpy(buffer + offset, text, textLen);     // Copy text
     offset += textLen;
     buffer[offset] = '\0'; 
 
 	return totalLength;
 	/* Check if text is too big, split text up. */
+}
+
+void printDataBuffer(void* buffer, size_t length) {
+    uint8_t* byteBuffer = (uint8_t*) buffer;
+    printf("Data Buffer Contents:\n");
+    for (size_t i = 0; i < length; i++) {
+        printf("%02x ", byteBuffer[i]);  // Print hexadecimal value
+        if (isprint(byteBuffer[i])) {
+            printf("(%c) ", byteBuffer[i]);  // Print ASCII character if printable
+        } else {
+            printf("(.) ");  // Use a placeholder for non-printable characters
+        }
+        if ((i + 1) % 8 == 0) {
+            printf("\n");  // Print a new line every 8 characters for better readability
+        }
+    }
+    printf("\n");
 }
 
 void processMsgFromServer(int socketNum) {
@@ -240,15 +259,19 @@ void processMsgFromServer(int socketNum) {
 				int offset;
 				offset = extractSrcHandle(recvBuf, destHandle);
 				extractMessage(recvBuf, message, offset);
-
 				printf("%s: %s\n", destHandle, message);
 				// terminal();
-				// memset(destHandle, 0, MAXHANDLE);
-				// memset(message, 0, 200);
+				memset(destHandle, 0, MAXHANDLE);
+				memset(message, 0, 200);
 				break;
 			}
 			case 7: {
 				/* Destination handle does not exist. */
+				char destHandle[MAXHANDLE];
+				// printDataBuffer(recvBuf, MAXBUF);
+				int offset = extractErrorHandle(recvBuf,destHandle);
+				printf("Handle '%s' does not exist.\n", destHandle);
+				memset(destHandle, 0, MAXHANDLE);
 				break;
 			}
 			case 9: {
@@ -276,6 +299,22 @@ void processMsgFromServer(int socketNum) {
 
 }
 
+int extractErrorHandle(const uint8_t* buffer, char* destHandle) {
+    if (buffer == NULL) {
+        return -1;
+    }
+
+    int offset = 0;
+    uint8_t flag = buffer[offset++];
+	printf("Flag is %d\n", flag);
+    uint8_t destHandleLen = buffer[offset++];
+	printf("desthandlelen is %d\n", destHandleLen);
+	memcpy(destHandle, buffer + offset, destHandleLen);
+	offset += destHandleLen;
+
+	return offset;
+}
+
 int extractSrcHandle(const uint8_t* buffer, char* srcHandle) {
     if (buffer == NULL) {
         return -1;
@@ -297,11 +336,9 @@ void extractMessage(const uint8_t* buffer, char* message, int offset) {
     if (buffer == NULL) {
         return;
     }
-
-	uint8_t destHandle = buffer[offset++];
-	uint8_t messageLen = buffer[offset];
+	// uint8_t destHandle = buffer[offset++];
+	int messageLen = strlen((char*)buffer + offset);
     memcpy(message, buffer + offset, messageLen);
-    message[messageLen] = '\0';
 }
 
 
