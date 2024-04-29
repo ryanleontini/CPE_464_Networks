@@ -9,18 +9,16 @@ int sendPDU(int socketNumber, uint8_t * dataBuffer, int lengthOfData) {
     int totalLength;
     int bytesSent;
     int headerSize;
-    uint8_t *pdu;
+    uint8_t pdu[1400];
     uint16_t netLength;
 
     headerSize = 2;
 
-    totalLength = headerSize + lengthOfData;
-
-    pdu = malloc(totalLength);
-    if (pdu == NULL) {
-        perror("Failed to allocate memory for PDU");
-        return -1;
+    if (lengthOfData > 1398) {
+        lengthOfData = 1398;
     }
+
+    totalLength = headerSize + lengthOfData;
 
     netLength = htons(totalLength);
     
@@ -34,8 +32,6 @@ int sendPDU(int socketNumber, uint8_t * dataBuffer, int lengthOfData) {
     } else {
         bytesSent -= 2; /* Remove length bytes */
     }
-
-    free(pdu);
 
     return bytesSent;
 }

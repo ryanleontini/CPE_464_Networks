@@ -42,24 +42,9 @@ int sendErrorPacket(uint8_t* errorBuf, char* destHandle, int destHandleLen);
 int getMessageOffset(uint8_t* dataBuffer);
 int sendHandleNum(int clientSocket);
 void sendFinish(int clientSocket);
-
-void printDataBuffer(void* buffer, size_t length) {
-    uint8_t* byteBuffer = (uint8_t*) buffer;
-    printf("Data Buffer Contents:\n");
-    for (size_t i = 0; i < length; i++) {
-        printf("%02x ", byteBuffer[i]);  // Print hexadecimal value
-        if (isprint(byteBuffer[i])) {
-            printf("(%c) ", byteBuffer[i]);  // Print ASCII character if printable
-        } else {
-            printf("(.) ");  // Use a placeholder for non-printable characters
-        }
-        if ((i + 1) % 8 == 0) {
-            printf("\n");  // Print a new line every 8 characters for better readability
-        }
-    }
-    printf("\n");
-}
-
+void sendFlag (int socket, int flag);
+int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text);
+void unpackMulticast(int clientSocket, char* buffer);
 
 int main(int argc, char *argv[])
 {
@@ -112,7 +97,6 @@ void serverControl(int mainSocket) {
 }
 
 void processClient(int clientSocket) {
-	printf("Processing client %d\n", clientSocket);
 	uint8_t dataBuffer[MAXBUF];
 	memset(dataBuffer, 0, MAXBUF);
 	int messageLen = 0;
@@ -146,10 +130,7 @@ void processClient(int clientSocket) {
 					uint8_t newBuf[1];
 					newBuf[0] = 2; /* Flag to send to client. */
 					sendPDU(clientSocket, (uint8_t *)newBuf, 1);
-					// printf("New Handle: %s\n", dataBuffer);
-					printHandleTable();
 				}
-				// memset(dataBuffer, 0, MAXBUF);
 				break;
 			}
 			/* Message */
@@ -160,9 +141,7 @@ void processClient(int clientSocket) {
 				int destHandleLen = extractDestHandle(dataBuffer, destHandle);
 				int destSocket = findSocket(destHandle);
 				int offset = sendErrorPacket(errorBuf, destHandle, destHandleLen);
-				// printf("Offset: %d\n", offset);
 
-				// printf("Dest socket: %d\n", destSocket);
 				if (destSocket == -1) {
 					printf("Invalid handle supplied.\n");
 					int sent = sendPDU(clientSocket, errorBuf, offset+2);
@@ -171,8 +150,6 @@ void processClient(int clientSocket) {
 				} else {
 					/* Check message size. */
 					int messageOffset = getMessageOffset(dataBuffer);
-					printf("Message offset %d\n", messageOffset);
-					printDataBuffer(dataBuffer, 30);
 					char *message = dataBuffer + messageOffset;
 					int messageLent = strlen(message) + 1; 
 					int sent;
@@ -193,11 +170,24 @@ void processClient(int clientSocket) {
 					} else {
 						sent = sendPDU(destSocket, dataBuffer, messageLen);
 					}
-					// int sent = sendPDU(destSocket, dataBuffer, messageLen);
-					printf("Bytes sent: %d\n", sent);
 					fflush(stdout);
 					break;
 				}
+			}
+			case 6: {
+				/* Multicast */
+				printf("Received multicast.\n");
+				unpackMulticast(clientSocket, dataBuffer);
+				break;
+			}
+			case 8: {
+				sendFlag(clientSocket, 9);
+				removeFromPollSet(clientSocket);
+
+				printf("Client %d disconnected.\n", clientSocket);
+				removeHandle(clientSocket);
+				close(clientSocket);
+				break;
 			}
 			case 10: {
 				int numHandles = sendHandleNum(clientSocket);
@@ -208,7 +198,6 @@ void processClient(int clientSocket) {
 					Handle *temp = NULL;
 					temp = getHandleAtIndex(i);
 					if (temp->handle != NULL && temp->validFlag == 1) {
-						printf("Found valid handle.\n");
 						char handleBuf[120];
 						handleBuf[0] = 12;
 						int handleLength = strlen(temp->handle);
@@ -232,9 +221,88 @@ void processClient(int clientSocket) {
 	{
         printf("Client %d disconnected.\n", clientSocket);
 		removeHandle(clientSocket);
-		printHandleTable();
 		close(clientSocket);
 		removeFromPollSet(clientSocket);
+	}
+}
+
+void unpackMulticast(int clientSocket, char* buffer) {
+	int bufferIndex = 1;
+	int srcHandleLen = buffer[bufferIndex++];
+	char srcHandle[100];
+	memcpy(srcHandle, buffer + bufferIndex, srcHandleLen);
+    srcHandle[srcHandleLen] = '\0'; 
+	bufferIndex += srcHandleLen;
+    int numHandles = buffer[bufferIndex++];
+
+	char tempDestBuff[500];
+	int tempDestCount = 0;
+    for (int i = 0; i < numHandles; i++) {
+		int destHandleLen = buffer[bufferIndex++];
+		tempDestBuff[tempDestCount++] = destHandleLen;
+		char destHandle[100];
+		memcpy(tempDestBuff + tempDestCount, buffer + bufferIndex, destHandleLen);
+		memcpy(destHandle, buffer + bufferIndex, destHandleLen);
+    	destHandle[destHandleLen] = '\0'; 
+		tempDestCount += destHandleLen;
+		bufferIndex += destHandleLen;
+    }
+	char *currentPointer = buffer + bufferIndex;
+    if (*currentPointer == '\0') {
+        printf("No message found in packet\n");
+        return;
+    }
+
+	int tempCount = 0;
+	char currentHand[100];
+    for (int i = 0; i < numHandles; i++) {
+		char newBuf[MAXBUF];
+		int currentLen = tempDestBuff[tempCount++];
+		memcpy(currentHand, tempDestBuff + tempCount, currentLen);
+    	currentHand[currentLen] = '\0'; 
+		tempCount += currentLen;
+
+		int result = packMessage(newBuf, MAXBUF, 5, 1, srcHandle, currentHand, currentPointer);
+		int socket = findSocket(currentHand);
+		int sent = sendPDU(socket, newBuf, result);
+		memset(newBuf, 0, MAXBUF);
+		memset(currentHand, 0, 100);
+	}
+}
+
+int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char* srcHandle, char* destHandle, char* text) {
+	if (!buffer || !srcHandle || !destHandle || !text) return -1;
+
+	size_t srcHandleLen = strlen(srcHandle);
+    size_t destHandleLen = strlen(destHandle);
+    size_t textLen = strlen(text);
+    int offset = 0;
+
+	size_t totalLength = 1 + srcHandleLen + 1 + 1 + destHandleLen + 1 + textLen + 1;
+
+    buffer[offset++] = (char)flag;              
+    buffer[offset++] = (char)srcHandleLen;      
+    memcpy(buffer + offset, srcHandle, srcHandleLen);  
+    offset += srcHandleLen;
+    buffer[offset++] = (char)numHandles;       
+    buffer[offset++] = (char)destHandleLen;    
+    memcpy(buffer + offset, destHandle, destHandleLen);
+    offset += destHandleLen;
+    memcpy(buffer + offset, text, textLen);  
+    offset += textLen;
+    buffer[offset] = '\0'; 
+
+	return totalLength;
+}
+
+void sendFlag (int socket, int flag) {
+	char flagBuf[1];
+	flagBuf[0] = flag;
+	int sent = sendPDU(socket, flagBuf, 1);
+	if (sent < 0)
+	{
+		perror("send call");
+		exit(-1);
 	}
 }
 
@@ -257,25 +325,15 @@ int sendHandleNum(int clientSocket) {
 }
 
 int getMessageOffset(uint8_t* dataBuffer) {
-    if (!dataBuffer) return -1;  // Error handling for null pointer
+    if (!dataBuffer) return -1; 
 
     int offset = 0;
-
-    // Skip the flag byte
     offset += 1;
-
-    // Read source handle length and skip it and the handle
     uint8_t srcHandleLen = dataBuffer[offset];
-    offset += 1 + srcHandleLen;  // Increment by 1 for length byte, then srcHandleLen bytes for the handle
-
-    // Skip numHandles byte
+    offset += 1 + srcHandleLen; 
     offset += 1;
-
-    // Read destination handle length and skip it and the handle
     uint8_t destHandleLen = dataBuffer[offset];
-    offset += 1 + destHandleLen;  // Increment by 1 for length byte, then destHandleLen bytes for the handle
-
-    // Now offset is positioned at the start of the text
+    offset += 1 + destHandleLen; 
     return offset + 1;
 }
 

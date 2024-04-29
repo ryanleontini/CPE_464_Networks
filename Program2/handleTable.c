@@ -49,7 +49,6 @@ void resizeHandleTable() {
 }
 
 int addHandle(int socketNum, char * handle) {
-    // printHandleInHex(handle);
     if (socketNum >= handleTableCapacity) {
         resizeHandleTable(socketNum + 1);
     }
@@ -57,11 +56,8 @@ int addHandle(int socketNum, char * handle) {
     /* Check if handle already in table. */
     for (int i = 0; i < handleTableSize; i++) {
         if (handleTable[i].handle != NULL) {
-            printf("Handle: %s", handle);
             if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
-                printf("Found");
-                // printHandleInHex(handleTable[socketNum].handle);
-                return -1; // Handle already exists
+                return -1;
             }
         }
     }
@@ -99,19 +95,8 @@ void removeHandle(size_t socketNum) {
 
 int findSocket(char * handle) {
 
-    // printHandleInHex(handle);
     for (size_t i = 0; i < handleTableSize; i++) {
-        // // if (handleTable[i].handle != NULL) {
-        //     printf("index is %d\n", i);
-        //     printf("handle is: %s\n", handle);
-        // //     // printHandleInHex(handle);
-        // //     // printf("handle table handle: %s\n", handleTable[i].handle);
-        // //     printHandleInHex(handleTable[i].handle);
-        // //     printf("\n");
-
-        // // }
         if (handleTable[i].validFlag && strcmp(handleTable[i].handle, handle) == 0) {
-            printHandleInHex(handleTable[i].handle);
             return (int)i;
         }
     }

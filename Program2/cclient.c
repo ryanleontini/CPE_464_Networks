@@ -45,10 +45,12 @@ int extractSrcHandle(const uint8_t* buffer, char* destHandle);
 void extractMessage(const uint8_t* buffer, char* message, int offset);
 int extractErrorHandle(const uint8_t* buffer, char* destHandle);
 void terminal();
+void sendFlag (int socket, int flag);
+int processMulticast(int socketNum, char* clientHandle);
 
 int main(int argc, char * argv[])
 {
-	int socketNum = 0;         //socket descriptor
+	int socketNum = 0;  
 	
 	checkArgs(argc, argv);
 
@@ -59,10 +61,6 @@ int main(int argc, char * argv[])
 
 	/* Connect to server */
 	connectToServer(socketNum, argv[3]);
-
-	// printf("Enter message: ");
-	// fflush(stdout);
-	// addToPollSet(STDIN_FILENO);
 
 	clientControl(socketNum, argv[3]);
 	
@@ -87,9 +85,6 @@ void connectToServer(int socketNum, char *clientHandle) {
 		sent = sendPDU(socketNum, dataBuffer, dataSize);
 		if (sent < 0) {
 			printf("Failed to send\n");
-		}
-		else {
-			// printf("Sent %d bytes.\n", sent);
 		}
     }
 }
@@ -147,7 +142,6 @@ void clientControl(int socketNum, char *clientHandle) {
 						printf("Text is missing or invalid.\n");
 						text = "";
 					}
-					// printf("Sending %s to %s\n", text, destinationHandle);
 					int result = packMessage(buffer, MAXBUF, 5, 1, clientHandle, destinationHandle, text);
 					int sent = sendPDU(socketNum, buffer, result);
 
@@ -155,8 +149,19 @@ void clientControl(int socketNum, char *clientHandle) {
 						perror("Error sending data");
 						break; 
 					}
-					// terminal();
 					memset(buffer, 0, MAXBUF);
+					break;
+				}
+				case 'c':
+				case 'C': {
+					int multi = processMulticast(socketNum, clientHandle);
+					if (multi == -1) {
+						printf("Failed to multicast.\n");
+					}
+					break;
+				}
+				case 'b':
+				case 'B': {
 					break;
 				}
 				case 'l':
@@ -170,12 +175,17 @@ void clientControl(int socketNum, char *clientHandle) {
 					}
 					break;
 				}
+				case 'e':
+				case 'E': {
+					sendFlag(socketNum, 8);
+					break;
+				}
 				default: {
 					printf("Invalid command.\n");
 					memset(buf, 0, sizeof(buf)); 
-					// terminal();
 					break;
 				}
+
 			}
         }
 
@@ -183,6 +193,68 @@ void clientControl(int socketNum, char *clientHandle) {
             printf("\nServer terminated.\n");
             break;
         }
+	}
+}
+
+int processMulticast(int socketNum, char* clientHandle) {
+	char buffer[MAXBUF];
+	buffer[0] = 6;
+	int srcHandleLen = strlen(clientHandle);
+	buffer[1] = srcHandleLen;
+	memcpy(buffer + 2, clientHandle, srcHandleLen);
+	int bufferIndex = 2 + srcHandleLen;
+
+	char *token = strtok(NULL, " "); 
+	if (token == NULL) {
+		printf("Error parsing number of handles.\n");
+		return -1;
+	}
+	int numHandles = atoi(token);
+	printf("Num handles: %d\n", numHandles);
+	if (numHandles < 2 || numHandles > 9) { 
+		printf("Invalid input. 2-9 handles required.\n");
+		return -1;
+	}
+	buffer[bufferIndex++] = numHandles;
+
+	for (int i = 0; i < numHandles; i++) {
+		char *destinationHandle = strtok(NULL, " ");
+		if (destinationHandle == NULL) {
+			printf("Error parsing handle %d\n", i + 1);
+			return -1;
+		}
+
+		int destLen = strlen(destinationHandle);
+		printf("Destination handle: %s\n", destinationHandle);
+		buffer[bufferIndex++] = destLen;
+		memcpy(buffer + bufferIndex, destinationHandle, destLen);
+		bufferIndex += destLen;
+	}
+	char *message = strtok(NULL, ""); 
+	if (message != NULL) {
+		int messageLen = strlen(message);
+		printf("Message: %s\n", message);
+		memcpy(buffer + bufferIndex, message, messageLen);
+		bufferIndex += messageLen;
+	}
+
+	if (bufferIndex < MAXBUF) {
+		buffer[bufferIndex] = '\0';
+	} else {
+		buffer[MAXBUF - 1] = '\0';
+	}
+	int sent = sendPDU(socketNum, buffer, MAXBUF);
+	return sent;
+}
+
+void sendFlag (int socket, int flag) {
+	char flagBuf[1];
+	flagBuf[0] = flag;
+	int sent = sendPDU(socket, flagBuf, 1);
+	if (sent < 0)
+	{
+		perror("send call");
+		exit(-1);
 	}
 }
 
@@ -196,15 +268,15 @@ int packMessage(char* buffer, size_t buffer_size, int flag, int numHandles, char
 
 	size_t totalLength = 1 + srcHandleLen + 1 + 1 + destHandleLen + 1 + textLen + 1;
 
-    buffer[offset++] = (char)flag;              // Flag
-    buffer[offset++] = (char)srcHandleLen;      // SrcHandleLen
-    memcpy(buffer + offset, srcHandle, srcHandleLen);  // Copy srcHandle
+    buffer[offset++] = (char)flag;             
+    buffer[offset++] = (char)srcHandleLen;     
+    memcpy(buffer + offset, srcHandle, srcHandleLen); 
     offset += srcHandleLen;
-    buffer[offset++] = (char)numHandles;        // Number of handles
-    buffer[offset++] = (char)destHandleLen;     // DestHandleLen
-    memcpy(buffer + offset, destHandle, destHandleLen); // Copy destHandle
+    buffer[offset++] = (char)numHandles;       
+    buffer[offset++] = (char)destHandleLen;    
+    memcpy(buffer + offset, destHandle, destHandleLen); 
     offset += destHandleLen;
-    memcpy(buffer + offset, text, textLen);     // Copy text
+    memcpy(buffer + offset, text, textLen); 
     offset += textLen;
     buffer[offset] = '\0'; 
 
@@ -216,14 +288,14 @@ void printDataBuffer(void* buffer, size_t length) {
     uint8_t* byteBuffer = (uint8_t*) buffer;
     printf("Data Buffer Contents:\n");
     for (size_t i = 0; i < length; i++) {
-        printf("%02x ", byteBuffer[i]);  // Print hexadecimal value
+        printf("%02x ", byteBuffer[i]); 
         if (isprint(byteBuffer[i])) {
-            printf("(%c) ", byteBuffer[i]);  // Print ASCII character if printable
+            printf("(%c) ", byteBuffer[i]);  
         } else {
-            printf("(.) ");  // Use a placeholder for non-printable characters
+            printf("(.) ");  
         }
         if ((i + 1) % 8 == 0) {
-            printf("\n");  // Print a new line every 8 characters for better readability
+            printf("\n"); 
         }
     }
     printf("\n");
@@ -232,10 +304,11 @@ void printDataBuffer(void* buffer, size_t length) {
 void processMsgFromServer(int socketNum) {
 	int recvLen;
 	uint8_t recvBuf[MAXBUF];
-	// memset(recvBuf, 0, sizeof(recvBuf));
 
 	/* Check if the server is still connected */
+
 	recvLen = recvPDU(socketNum, recvBuf, sizeof(recvBuf) - 1);
+
 	if (recvLen < 0) {
 		if (errno == EWOULDBLOCK || errno == EAGAIN) {
 			/* No data available right now */
@@ -250,11 +323,9 @@ void processMsgFromServer(int socketNum) {
 		return;
 	} else {
 		int flag = recvBuf[0];
-
 		switch (flag) {
 			case 2: {
-				// printf("Connected to the server.\n");
-				// fflush(stdout);
+				/* Connected to the server. */
 				break;
 			}
 			case 3: {
@@ -271,7 +342,6 @@ void processMsgFromServer(int socketNum) {
 				offset = extractSrcHandle(recvBuf, destHandle);
 				extractMessage(recvBuf, message, offset);
 				printf("%s: %s\n", destHandle, message);
-				// terminal();
 				memset(destHandle, 0, MAXHANDLE);
 				memset(message, 0, 200);
 				break;
@@ -279,7 +349,6 @@ void processMsgFromServer(int socketNum) {
 			case 7: {
 				/* Destination handle does not exist. */
 				char destHandle[MAXHANDLE];
-				// printDataBuffer(recvBuf, MAXBUF);
 				int offset = extractErrorHandle(recvBuf,destHandle);
 				printf("Handle '%s' does not exist.\n", destHandle);
 				memset(destHandle, 0, MAXHANDLE);
@@ -287,6 +356,7 @@ void processMsgFromServer(int socketNum) {
 			}
 			case 9: {
 				/* ACKing the client's exit. */
+				exit(-1);
 				break;
 			}
 			case 11: {
@@ -302,7 +372,7 @@ void processMsgFromServer(int socketNum) {
 				char handle[101];
 				int handleLength = recvBuf[1];
 				memcpy(handle, recvBuf + 2, handleLength);
-				handle[handleLength] = '\0'; // Null-terminate the string
+				handle[handleLength] = '\0';  
 				printf("%s\n", handle);
 				break;
 			}
@@ -357,7 +427,6 @@ void extractMessage(const uint8_t* buffer, char* message, int offset) {
     if (buffer == NULL) {
         return;
     }
-	// uint8_t destHandle = buffer[offset++];
 	int messageLen = strlen((char*)buffer + offset);
     memcpy(message, buffer + offset, messageLen);
 }
